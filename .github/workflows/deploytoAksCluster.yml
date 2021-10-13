@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: arcgetingedemo001.azurecr.io
+        username: ${{ secrets.acr_arcgetingedemo001_username }}
+        password: ${{ secrets.acr_arcgetingedemo001_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/Demo.WeatherService" -f  "Demo.WeatherService/Dockerfile" -t arcgetingedemo001.azurecr.io/rggetingedemo001:${{ github.sha }} --label dockerfile-path=Demo.WeatherService/Dockerfile
+        docker push arcgetingedemo001.azurecr.io/rggetingedemo001:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_rggetingedemo001_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep rg-getinge-demo-001a86f | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace rg-getinge-demo-001a86f`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: rg-getinge-demo-001a86f
+        container-registry-url: arcgetingedemo001.azurecr.io
+        container-registry-username: ${{ secrets.acr_arcgetingedemo001_username }}
+        container-registry-password: ${{ secrets.acr_arcgetingedemo001_password }}
+        secret-name: rggetingedemdockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: rg-getinge-demo-001a86f
+        manifests: |
+          manifests/deployment-1.yml
+          manifests/service-1.yml
+        images: |
+          arcgetingedemo001.azurecr.io/rggetingedemo001:${{ github.sha }}
+        imagepullsecrets: |
+          rggetingedemdockerauth
